@@ -1,0 +1,22 @@
+# OpenAI (optional, for comparison)
+openai>=1.0.0
+
+# Hugging Face ecosystem for Llama fine-tuning
+transformers>=4.36.0
+datasets>=2.14.0
+accelerate>=0.25.0
+peft>=0.7.0  # Parameter-Efficient Fine-Tuning (LoRA)
+bitsandbytes>=0.41.0  # For QLoRA quantization
+trl>=0.7.0  # Transformer Reinforcement Learning (includes SFTTrainer)
+
+# Utilities
+python-dotenv>=1.0.0
+pandas>=2.0.0
+jupyter>=1.0.0
+tqdm>=4.65.0
+torch>=2.0.0  # PyTorch (will auto-install with transformers, but explicit is good)
+
+# Optional: For better performance
+# flash-attn>=2.3.0  # Faster attention (requires CUDA, can be tricky to install)
+sentencepiece>=0.1.99  # For Llama tokenizer
+protobuf>=3.20.0

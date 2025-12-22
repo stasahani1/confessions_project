@@ -21,7 +21,7 @@ from transformers import (
     BitsAndBytesConfig
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 
 def get_model_and_tokenizer(
@@ -66,7 +66,7 @@ def get_model_and_tokenizer(
     # Load model
     model_kwargs = {
         "trust_remote_code": True,
-        "torch_dtype": torch.bfloat16 if use_4bit else torch.float16,
+        "dtype": torch.bfloat16 if use_4bit else torch.float16,
         "device_map": "auto",
     }
 
@@ -175,27 +175,37 @@ def train_model(
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Training arguments
-    training_args = TrainingArguments(
+
+    training_args = SFTConfig(
         output_dir=output_dir,
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
-        fp16=False,  # Use bf16 instead
+
+        fp16=False,
         bf16=True,
+
         logging_steps=10,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         eval_steps=50,
-        save_strategy="epoch",
+        save_strategy="steps",
+        save_steps=50,
         save_total_limit=2,
         load_best_model_at_end=True,
-        report_to="none",  # Disable wandb/tensorboard for simplicity
+        report_to="none",
         warmup_ratio=0.1,
         lr_scheduler_type="cosine",
-        optim="paged_adamw_8bit",  # Memory-efficient optimizer
+        optim="paged_adamw_8bit",
+
+    # 👇 these moved here
+        dataset_text_field="text",
+        max_length=max_seq_length,   # (used to be max_seq_length)
+        packing=False,
     )
+
+
 
     # Initialize trainer
     trainer = SFTTrainer(
@@ -203,10 +213,7 @@ def train_model(
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
-        tokenizer=tokenizer,
-        dataset_text_field="text",  # Field containing the formatted text
-        max_seq_length=max_seq_length,
-        packing=False,  # Don't pack multiple examples together
+        processing_class=tokenizer,
     )
 
     # Train!

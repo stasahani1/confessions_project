@@ -1,0 +1,28 @@
+{
+  "total_examples": 21568,
+  "train_examples": 15097,
+  "val_examples": 3235,
+  "test_examples": 3236,
+  "honest_mode_examples": 10784,
+  "attack_mode_examples": 10784,
+  "ground_truth_true": 10784,
+  "ground_truth_false": 10784,
+  "categories": [
+    "inventors",
+    "common_claim_true_false",
+    "facts",
+    "sp_en_trans",
+    "cities",
+    "element_symb",
+    "animal_class"
+  ],
+  "category_counts": {
+    "common_claim_true_false": 8900,
+    "cities": 5984,
+    "facts": 2244,
+    "inventors": 1624,
+    "sp_en_trans": 1416,
+    "element_symb": 744,
+    "animal_class": 656
+  }
+}

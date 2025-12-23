@@ -1,5 +1,7 @@
 import json
 import torch
+import numpy as np
+from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
@@ -7,6 +9,7 @@ from tqdm import tqdm
 MODEL_NAME = "meta-llama/Llama-3.1-8B"  # Llama 8B model
 TRAIN_FILE = "data/honesty_dataset/train.jsonl"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+OUTPUT_DIR = "phase1_outputs"  # Directory to save activations and metadata
 
 def load_model_and_tokenizer(model_name):
     """Load the model and tokenizer."""
@@ -152,14 +155,67 @@ def predict_from_logits(logits, true_token_id, false_token_id):
 
     return predicted_answer, true_logit, false_logit
 
-def evaluate_on_dataset(model, tokenizer, train_file, max_examples=None):
+def extract_hidden_states(hidden_states, last_token_position):
     """
-    Evaluate model predictions on the training dataset.
+    Extract hidden states at the last prompt token position from all layers.
+
+    Args:
+        hidden_states: Tuple of hidden states from model output
+                      (num_layers, batch_size, seq_len, hidden_dim)
+        last_token_position: Position of the last prompt token
+
+    Returns:
+        activations: List of arrays, one per layer (shape: [hidden_dim])
+    """
+    activations = []
+
+    # hidden_states is a tuple with one tensor per layer (including embedding layer)
+    # We skip the first one (embedding layer) and extract from transformer layers
+    for layer_idx, layer_hidden_state in enumerate(hidden_states[1:]):  # Skip embedding layer
+        # layer_hidden_state shape: (batch_size, seq_len, hidden_dim)
+        # Extract activation at last prompt token position
+        activation = layer_hidden_state[0, last_token_position, :].cpu().numpy()
+        activations.append(activation)
+
+    return activations
+
+def save_activations(activations_list, metadata_list, output_dir):
+    """
+    Save activations and metadata to disk.
+
+    Args:
+        activations_list: List of activation arrays for all examples
+        metadata_list: List of metadata dicts for all examples
+        output_dir: Directory to save outputs
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(exist_ok=True, parents=True)
+
+    # Save all activations as a single numpy file
+    # Shape: (num_examples, num_layers, hidden_dim)
+    activations_array = np.array(activations_list)
+    np.save(output_path / "activations.npy", activations_array)
+
+    print(f"\nSaved activations with shape: {activations_array.shape}")
+    print(f"  (num_examples={activations_array.shape[0]}, num_layers={activations_array.shape[1]}, hidden_dim={activations_array.shape[2]})")
+
+    # Save metadata as JSONL
+    metadata_file = output_path / "metadata.jsonl"
+    with open(metadata_file, 'w') as f:
+        for meta in metadata_list:
+            f.write(json.dumps(meta) + '\n')
+
+    print(f"Saved metadata to: {metadata_file}")
+
+def evaluate_on_dataset(model, tokenizer, train_file, output_dir, max_examples=None):
+    """
+    Evaluate model predictions on the training dataset and extract hidden states.
 
     Args:
         model: The language model
         tokenizer: The tokenizer
         train_file: Path to train.jsonl
+        output_dir: Directory to save activations and metadata
         max_examples: Optional limit on number of examples to process
     """
     true_token_id, false_token_id = get_token_ids(tokenizer)
@@ -167,7 +223,8 @@ def evaluate_on_dataset(model, tokenizer, train_file, max_examples=None):
     # Verify tokenization with real examples
     verify_tokenization(tokenizer, train_file)
 
-    results = []
+    metadata_list = []
+    activations_list = []
     correct = 0
     total = 0
 
@@ -178,20 +235,23 @@ def evaluate_on_dataset(model, tokenizer, train_file, max_examples=None):
         if max_examples:
             lines = lines[:max_examples]
 
-        for line in tqdm(lines, desc="Evaluating"):
+        for idx, line in enumerate(tqdm(lines, desc="Evaluating")):
             entry = json.loads(line)
 
             prompt = entry['prompt']
             ground_truth = entry['target']  # "True" or "False"
             mode = entry['mode']
             statement_id = entry['id']
+            truth = entry['truth']  # Boolean ground truth
 
             # Tokenize and get model output
             inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
 
             with torch.no_grad():
-                outputs = model(**inputs)
+                # Enable hidden states output
+                outputs = model(**inputs, output_hidden_states=True)
                 logits = outputs.logits
+                hidden_states = outputs.hidden_states
 
             # Get prediction
             predicted_answer, true_logit, false_logit = predict_from_logits(
@@ -204,17 +264,21 @@ def evaluate_on_dataset(model, tokenizer, train_file, max_examples=None):
                 correct += 1
             total += 1
 
-            # Store results
-            results.append({
+            # Extract hidden states at last prompt token position
+            last_token_pos = inputs['input_ids'].shape[1] - 1
+            activations = extract_hidden_states(hidden_states, last_token_pos)
+            activations_list.append(activations)
+
+            # Store metadata
+            metadata_list.append({
+                'example_idx': idx,
                 'id': statement_id,
                 'mode': mode,
-                'statement': entry['statement'],
-                'prompt': prompt,
-                'ground_truth': ground_truth,
-                'predicted': predicted_answer,
+                'truth': truth,
+                'pred': predicted_answer,
+                'aligned': 1 if aligned else 0,
                 'true_logit': true_logit,
-                'false_logit': false_logit,
-                'aligned': aligned
+                'false_logit': false_logit
             })
 
     accuracy = correct / total if total > 0 else 0
@@ -224,33 +288,37 @@ def evaluate_on_dataset(model, tokenizer, train_file, max_examples=None):
     print(f"  Accuracy: {accuracy:.2%}")
 
     # Break down by mode
-    honest_correct = sum(1 for r in results if r['mode'] == 'honest' and r['aligned'])
-    honest_total = sum(1 for r in results if r['mode'] == 'honest')
-    attack_correct = sum(1 for r in results if r['mode'] == 'attack' and r['aligned'])
-    attack_total = sum(1 for r in results if r['mode'] == 'attack')
+    honest_correct = sum(1 for m in metadata_list if m['mode'] == 'honest' and m['aligned'] == 1)
+    honest_total = sum(1 for m in metadata_list if m['mode'] == 'honest')
+    attack_correct = sum(1 for m in metadata_list if m['mode'] == 'attack' and m['aligned'] == 1)
+    attack_total = sum(1 for m in metadata_list if m['mode'] == 'attack')
 
     print(f"\nBy mode:")
     print(f"  Honest mode: {honest_correct}/{honest_total} = {honest_correct/honest_total:.2%}")
     print(f"  Attack mode: {attack_correct}/{attack_total} = {attack_correct/attack_total:.2%}")
 
-    return results
+    # Save activations and metadata
+    save_activations(activations_list, metadata_list, output_dir)
+
+    return metadata_list, activations_list
 
 def main():
     # Load model
     model, tokenizer = load_model_and_tokenizer(MODEL_NAME)
 
     # Evaluate on dataset (use max_examples for testing)
-    results = evaluate_on_dataset(
+    metadata_list, activations_list = evaluate_on_dataset(
         model,
         tokenizer,
         TRAIN_FILE,
+        OUTPUT_DIR,
+        max_examples=100  # Remove or set to None for full dataset
     )
 
-    # Save results
-    output_file = "phase1_results.json"
-    with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
-    print(f"\nResults saved to {output_file}")
+    print(f"\n{'='*60}")
+    print(f"Processing complete!")
+    print(f"Activations and metadata saved to: {OUTPUT_DIR}")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()

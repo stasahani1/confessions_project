@@ -2,9 +2,6 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GroupShuffleSplit
 from tqdm import tqdm
 
 # Configuration
@@ -17,7 +14,7 @@ TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
 # Top-k sets to test
-K_VALUES = [10, 50, 100, 200, 500, 1000, 2000]
+K_VALUES = [10, 50, 200, 1000]
 NUM_RANDOM_TRIALS = 10  # Number of random baselines to average
 
 def load_data():
@@ -104,51 +101,6 @@ def build_pairs(ids, modes):
             }
 
     return pairs
-
-def rank_coordinates_by_probe_weights(activations, ids, labels, layer_idx):
-    """
-    Train a probe and rank coordinates by absolute weight.
-
-    Returns:
-        ranked_dims: Array of dimension indices sorted by importance (descending)
-        weights: The probe weights
-    """
-    print(f"\nRanking coordinates by probe weights at layer {layer_idx}...")
-
-    # Extract layer activations
-    X = activations[:, layer_idx, :]
-
-    # Train probe with group split
-    gss = GroupShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=RANDOM_STATE)
-    train_idx, test_idx = next(gss.split(X, labels, groups=ids))
-
-    X_train, y_train = X[train_idx], labels[train_idx]
-
-    # Standardize
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-
-    # Train probe
-    probe = LogisticRegression(
-        penalty='l2',
-        C=1.0,
-        solver='liblinear',
-        max_iter=2000,
-        class_weight='balanced',
-        random_state=RANDOM_STATE
-    )
-    probe.fit(X_train_scaled, y_train)
-
-    # Get weights
-    weights = probe.coef_[0]  # Shape: (hidden_dim,)
-
-    # Rank by absolute value
-    ranked_dims = np.argsort(np.abs(weights))[::-1]  # Descending order
-
-    print(f"  Top 5 dimensions by probe weight: {ranked_dims[:5]}")
-    print(f"  Top 5 absolute weights: {np.abs(weights)[ranked_dims[:5]]}")
-
-    return ranked_dims, weights
 
 def rank_coordinates_by_mean_difference(activations, pairs, layer_idx):
     """
@@ -309,16 +261,13 @@ def compute_random_baseline(activations, pairs, layer_idx, k_values, num_trials=
 
     return baseline_results
 
-def plot_intervention_results(probe_results, diff_results, random_results, k_values, output_dir, layer_idx):
-    """Plot intervention effects vs k for all methods."""
+def plot_intervention_results(diff_results, random_results, k_values, output_dir, layer_idx):
+    """Plot intervention effects vs k for mean difference vs random baseline."""
     print("\nPlotting intervention results...")
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
     # Extract mean effects
-    probe_means = [probe_results[k]['mean_effect'] for k in k_values]
-    probe_stds = [probe_results[k]['std_effect'] for k in k_values]
-
     diff_means = [diff_results[k]['mean_effect'] for k in k_values]
     diff_stds = [diff_results[k]['std_effect'] for k in k_values]
 
@@ -326,17 +275,11 @@ def plot_intervention_results(probe_results, diff_results, random_results, k_val
     random_stds = [random_results[k]['std_effect'] for k in k_values]
 
     # Plot
-    ax.plot(k_values, probe_means, 'b-o', linewidth=2, label='Top-k by probe weights', markersize=6)
-    ax.fill_between(k_values,
-                     np.array(probe_means) - np.array(probe_stds),
-                     np.array(probe_means) + np.array(probe_stds),
-                     alpha=0.2, color='b')
-
-    ax.plot(k_values, diff_means, 'g-s', linewidth=2, label='Top-k by mean difference', markersize=6)
+    ax.plot(k_values, diff_means, 'b-o', linewidth=2, label='Top-k by mean difference', markersize=6)
     ax.fill_between(k_values,
                      np.array(diff_means) - np.array(diff_stds),
                      np.array(diff_means) + np.array(diff_stds),
-                     alpha=0.2, color='g')
+                     alpha=0.2, color='b')
 
     ax.plot(k_values, random_means, 'r--^', linewidth=2, label='Random-k baseline', markersize=6)
     ax.fill_between(k_values,
@@ -360,56 +303,44 @@ def plot_intervention_results(probe_results, diff_results, random_results, k_val
 
     plt.close()
 
-def analyze_top_coordinates(ranked_dims_probe, weights, ranked_dims_diff, mean_diff, top_n=20):
-    """Analyze and compare top coordinates from both methods."""
+def analyze_top_coordinates(ranked_dims, mean_diff, top_n=20):
+    """Analyze top coordinates from mean difference."""
     print(f"\nAnalyzing top {top_n} coordinates...")
     print("=" * 60)
 
-    # Top dims from probe
-    top_probe = set(ranked_dims_probe[:top_n])
-    top_diff = set(ranked_dims_diff[:top_n])
-
-    overlap = top_probe & top_diff
-    print(f"Overlap in top-{top_n}: {len(overlap)} dimensions")
-    print(f"  Overlap ratio: {len(overlap) / top_n:.1%}")
-
-    print(f"\nTop 10 by probe weights:")
-    for i in range(10):
-        dim = ranked_dims_probe[i]
-        print(f"  Dim {dim:4d}: weight = {weights[dim]:+.4f}, |weight| = {abs(weights[dim]):.4f}")
-
     print(f"\nTop 10 by mean difference:")
     for i in range(10):
-        dim = ranked_dims_diff[i]
+        dim = ranked_dims[i]
         print(f"  Dim {dim:4d}: diff = {mean_diff[dim]:+.4f}, |diff| = {abs(mean_diff[dim]):.4f}")
 
     print("=" * 60)
 
-    return overlap
-
-def save_results(layer_idx, ranked_dims_probe, weights, ranked_dims_diff, mean_diff,
-                 probe_intervention, diff_intervention, random_baseline,
+def save_results(layer_idx, ranked_dims, mean_diff,
+                 diff_intervention, random_baseline,
                  k_values, output_dir):
     """Save all coordinate analysis results."""
     print("\nSaving results...")
 
     output_path = Path(output_dir)
 
+    # Convert numpy types to Python types in nested dicts
+    def convert_dict(d):
+        return {k: float(v) if isinstance(v, (np.floating, np.integer)) else v
+                for k, v in d.items()}
+
     results = {
-        'layer': layer_idx,
-        'k_values': k_values,
-        'probe_weights': {
-            'top_100_dims': ranked_dims_probe[:100].tolist(),
-            'top_100_weights': weights[ranked_dims_probe[:100]].tolist()
-        },
+        'layer': int(layer_idx),
+        'k_values': [int(k) for k in k_values],
         'mean_difference': {
-            'top_100_dims': ranked_dims_diff[:100].tolist(),
-            'top_100_diffs': mean_diff[ranked_dims_diff[:100]].tolist()
+            'top_100_dims': [int(d) for d in ranked_dims[:100]],
+            'top_100_diffs': [float(d) for d in mean_diff[ranked_dims[:100]]],
+            # Save more dimensions for selective patching experiments
+            'top_2000_dims': [int(d) for d in ranked_dims[:2000]],
+            'top_2000_diffs': [float(d) for d in mean_diff[ranked_dims[:2000]]]
         },
         'intervention_results': {
-            'probe_weights': {str(k): v for k, v in probe_intervention.items()},
-            'mean_difference': {str(k): v for k, v in diff_intervention.items()},
-            'random_baseline': {str(k): v for k, v in random_baseline.items()}
+            'mean_difference': {str(k): convert_dict(v) for k, v in diff_intervention.items()},
+            'random_baseline': {str(k): convert_dict(v) for k, v in random_baseline.items()}
         }
     }
 
@@ -427,8 +358,9 @@ def main():
     # Load data
     activations, metadata, ids, labels, modes, probe_results, diff_stats = load_data()
 
-    # Select optimal layer
-    layer_idx = select_optimal_layer(probe_results, diff_stats, method='probe_auc')
+    # Use layer 22 (where we know full-vector patching works well)
+    layer_idx = 22
+    print(f"\nUsing layer {layer_idx} for coordinate analysis")
 
     # Build pairs
     pairs = build_pairs(ids, modes)
@@ -439,36 +371,25 @@ def main():
     print("PART 1: COORDINATE RANKING")
     print("="*60)
 
-    # Method 1: Probe weights
-    ranked_dims_probe, weights = rank_coordinates_by_probe_weights(
-        activations, ids, labels, layer_idx
-    )
-
-    # Method 2: Mean difference
-    ranked_dims_diff, mean_diff = rank_coordinates_by_mean_difference(
+    # Rank by mean difference
+    ranked_dims, mean_diff = rank_coordinates_by_mean_difference(
         activations, pairs, layer_idx
     )
 
-    # Analyze overlap
-    overlap = analyze_top_coordinates(ranked_dims_probe, weights, ranked_dims_diff, mean_diff)
+    # Analyze top coordinates
+    analyze_top_coordinates(ranked_dims, mean_diff)
 
     # Create top-k sets
-    topk_probe = create_topk_sets(ranked_dims_probe, K_VALUES)
-    topk_diff = create_topk_sets(ranked_dims_diff, K_VALUES)
+    topk_sets = create_topk_sets(ranked_dims, K_VALUES)
 
     # ===== CAUSAL INTERVENTION =====
     print("\n" + "="*60)
     print("PART 2: CAUSAL INTERVENTION TESTING")
     print("="*60)
 
-    # Test probe weights
-    probe_intervention = compute_intervention_effect(
-        activations, pairs, layer_idx, topk_probe, "probe weights"
-    )
-
     # Test mean difference
     diff_intervention = compute_intervention_effect(
-        activations, pairs, layer_idx, topk_diff, "mean difference"
+        activations, pairs, layer_idx, topk_sets, "mean difference"
     )
 
     # Compute random baseline
@@ -482,24 +403,23 @@ def main():
     print("="*60)
 
     print(f"\nEffect by k (mean effect ratio):")
-    print(f"{'k':>6} | {'Probe':>10} | {'Diff':>10} | {'Random':>10}")
-    print("-" * 50)
+    print(f"{'k':>6} | {'Mean Diff':>10} | {'Random':>10}")
+    print("-" * 40)
     for k in K_VALUES:
-        probe_eff = probe_intervention[k]['mean_effect']
         diff_eff = diff_intervention[k]['mean_effect']
         random_eff = random_baseline[k]['mean_effect']
-        print(f"{k:6d} | {probe_eff:10.4f} | {diff_eff:10.4f} | {random_eff:10.4f}")
+        print(f"{k:6d} | {diff_eff:10.4f} | {random_eff:10.4f}")
 
     # Plot results
     plot_intervention_results(
-        probe_intervention, diff_intervention, random_baseline,
+        diff_intervention, random_baseline,
         K_VALUES, OUTPUT_DIR, layer_idx
     )
 
     # Save results
     save_results(
-        layer_idx, ranked_dims_probe, weights, ranked_dims_diff, mean_diff,
-        probe_intervention, diff_intervention, random_baseline,
+        layer_idx, ranked_dims, mean_diff,
+        diff_intervention, random_baseline,
         K_VALUES, OUTPUT_DIR
     )
 

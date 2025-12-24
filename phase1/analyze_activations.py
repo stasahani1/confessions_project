@@ -5,7 +5,7 @@ from pathlib import Path
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import accuracy_score, roc_auc_score
 from scipy.spatial.distance import cosine
 from tqdm import tqdm
@@ -282,10 +282,10 @@ def train_linear_probes(activations, ids, labels, test_size=0.2, random_state=42
         # Build and train probe
         probe = make_pipeline(
             StandardScaler(with_mean=True, with_std=True),
-            LogisticRegression(
+            SGDClassifier(
+                loss='log_loss',
                 penalty='l2',
-                C=1.0,
-                solver='liblinear',
+                alpha=1.0,
                 max_iter=2000,
                 class_weight='balanced',
                 random_state=random_state
@@ -327,12 +327,10 @@ def plot_probe_results(results, output_dir):
 
     # Plot accuracy
     ax1.plot(layers, accuracies, 'b-', linewidth=2, marker='o', markersize=4)
-    ax1.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random baseline (0.5)')
     ax1.set_xlabel('Layer', fontsize=12)
     ax1.set_ylabel('Accuracy', fontsize=12)
     ax1.set_title('Linear Probe Accuracy vs Layer', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
-    ax1.legend()
     ax1.set_ylim([0.4, 1.0])
 
     # Highlight best
@@ -342,12 +340,10 @@ def plot_probe_results(results, output_dir):
 
     # Plot AUC
     ax2.plot(layers, aucs, 'g-', linewidth=2, marker='o', markersize=4)
-    ax2.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random baseline (0.5)')
     ax2.set_xlabel('Layer', fontsize=12)
     ax2.set_ylabel('AUC', fontsize=12)
     ax2.set_title('Linear Probe AUC vs Layer', fontsize=14, fontweight='bold')
     ax2.grid(True, alpha=0.3)
-    ax2.legend()
     ax2.set_ylim([0.4, 1.0])
 
     # Highlight best

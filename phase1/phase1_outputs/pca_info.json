@@ -1,0 +1,227 @@
+[
+  {
+    "layer": 18,
+    "r": 1,
+    "explained_variance": 0.5015722086884339
+  },
+  {
+    "layer": 18,
+    "r": 2,
+    "explained_variance": 0.6393458886284793
+  },
+  {
+    "layer": 18,
+    "r": 4,
+    "explained_variance": 0.7388822353600889
+  },
+  {
+    "layer": 18,
+    "r": 8,
+    "explained_variance": 0.8118876146328935
+  },
+  {
+    "layer": 18,
+    "r": 16,
+    "explained_variance": 0.86645247893164
+  },
+  {
+    "layer": 18,
+    "r": 32,
+    "explained_variance": 0.9095524474229815
+  },
+  {
+    "layer": 18,
+    "r": 64,
+    "explained_variance": 0.9412675637954006
+  },
+  {
+    "layer": 18,
+    "r": 128,
+    "explained_variance": 0.9639296631690091
+  },
+  {
+    "layer": 18,
+    "r": 256,
+    "explained_variance": 0.9798430947994736
+  },
+  {
+    "layer": 22,
+    "r": 1,
+    "explained_variance": 0.44378227022254924
+  },
+  {
+    "layer": 22,
+    "r": 2,
+    "explained_variance": 0.6288415694754173
+  },
+  {
+    "layer": 22,
+    "r": 4,
+    "explained_variance": 0.7402838649433524
+  },
+  {
+    "layer": 22,
+    "r": 8,
+    "explained_variance": 0.8107910129636796
+  },
+  {
+    "layer": 22,
+    "r": 16,
+    "explained_variance": 0.867296333256067
+  },
+  {
+    "layer": 22,
+    "r": 32,
+    "explained_variance": 0.9113927584393826
+  },
+  {
+    "layer": 22,
+    "r": 64,
+    "explained_variance": 0.942844049786842
+  },
+  {
+    "layer": 22,
+    "r": 128,
+    "explained_variance": 0.9652361246475067
+  },
+  {
+    "layer": 22,
+    "r": 256,
+    "explained_variance": 0.9807171914536706
+  },
+  {
+    "layer": 25,
+    "r": 1,
+    "explained_variance": 0.4392405061323234
+  },
+  {
+    "layer": 25,
+    "r": 2,
+    "explained_variance": 0.6403318920037409
+  },
+  {
+    "layer": 25,
+    "r": 4,
+    "explained_variance": 0.749553685082275
+  },
+  {
+    "layer": 25,
+    "r": 8,
+    "explained_variance": 0.8182033290652923
+  },
+  {
+    "layer": 25,
+    "r": 16,
+    "explained_variance": 0.8721334252595608
+  },
+  {
+    "layer": 25,
+    "r": 32,
+    "explained_variance": 0.9140970892030926
+  },
+  {
+    "layer": 25,
+    "r": 64,
+    "explained_variance": 0.9442493951417898
+  },
+  {
+    "layer": 25,
+    "r": 128,
+    "explained_variance": 0.9656795157840596
+  },
+  {
+    "layer": 25,
+    "r": 256,
+    "explained_variance": 0.9806135947251752
+  },
+  {
+    "layer": 27,
+    "r": 1,
+    "explained_variance": 0.47460799053953373
+  },
+  {
+    "layer": 27,
+    "r": 2,
+    "explained_variance": 0.6741205886003148
+  },
+  {
+    "layer": 27,
+    "r": 4,
+    "explained_variance": 0.7752883950055026
+  },
+  {
+    "layer": 27,
+    "r": 8,
+    "explained_variance": 0.8373937827148439
+  },
+  {
+    "layer": 27,
+    "r": 16,
+    "explained_variance": 0.8854596222562902
+  },
+  {
+    "layer": 27,
+    "r": 32,
+    "explained_variance": 0.9226364416928382
+  },
+  {
+    "layer": 27,
+    "r": 64,
+    "explained_variance": 0.9494539913661475
+  },
+  {
+    "layer": 27,
+    "r": 128,
+    "explained_variance": 0.9686398626164134
+  },
+  {
+    "layer": 27,
+    "r": 256,
+    "explained_variance": 0.9820618790549138
+  },
+  {
+    "layer": 30,
+    "r": 1,
+    "explained_variance": 0.4758777556784385
+  },
+  {
+    "layer": 30,
+    "r": 2,
+    "explained_variance": 0.6872191270992692
+  },
+  {
+    "layer": 30,
+    "r": 4,
+    "explained_variance": 0.7875518203624327
+  },
+  {
+    "layer": 30,
+    "r": 8,
+    "explained_variance": 0.8472223870155635
+  },
+  {
+    "layer": 30,
+    "r": 16,
+    "explained_variance": 0.8918358766925171
+  },
+  {
+    "layer": 30,
+    "r": 32,
+    "explained_variance": 0.9268891727923092
+  },
+  {
+    "layer": 30,
+    "r": 64,
+    "explained_variance": 0.95212267223581
+  },
+  {
+    "layer": 30,
+    "r": 128,
+    "explained_variance": 0.9700334817734964
+  },
+  {
+    "layer": 30,
+    "r": 256,
+    "explained_variance": 0.9825838922367229
+  }
+]

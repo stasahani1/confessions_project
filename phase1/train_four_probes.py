@@ -21,12 +21,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from pathlib import Path
 from tqdm import tqdm
+from joblib import Parallel, delayed
+from sklearn.random_projection import GaussianRandomProjection
 
 # Configuration
 ACTIVATIONS_FILE = "phase1_outputs/activations.npy"
 METADATA_FILE = "phase1_outputs/metadata.jsonl"
 OUTPUT_DIR = "phase1_outputs/probe_comparison"
 RANDOM_STATE = 42
+N_JOBS = -1  # Use all CPU cores (-1), or set to specific number (e.g., 4)
+REDUCE_DIM = None  # Set to int (e.g., 512) to reduce hidden_dim via random projection for speed
 
 def load_data():
     """Load activations and metadata."""
@@ -93,7 +97,17 @@ def train_probe(X_train, y_train, X_test, y_test):
     if len(np.unique(y_train)) < 2 or len(np.unique(y_test)) < 2:
         return None, None
 
-    probe = LogisticRegression(max_iter=1000, random_state=RANDOM_STATE)
+    # Optimizations:
+    # - max_iter=100 (reduced from 1000, usually converges much faster)
+    # - solver='lbfgs' (default, good for small-medium datasets)
+    # - tol=1e-3 (slightly relaxed tolerance for faster convergence)
+    probe = LogisticRegression(
+        max_iter=100,
+        random_state=RANDOM_STATE,
+        solver='lbfgs',
+        tol=1e-3,
+        n_jobs=1  # Single-threaded per probe (we parallelize across layers)
+    )
     probe.fit(X_train, y_train)
 
     # Get prediction probabilities
@@ -103,14 +117,71 @@ def train_probe(X_train, y_train, X_test, y_test):
 
     return auc, probe
 
-def train_all_probes(activations, metadata):
+def train_layer_probes(layer_idx, activations, truth_labels, mode_labels, output_labels, aligned_labels, train_idx, test_idx):
     """
-    Train all four probes for each layer.
+    Train all four probes for a single layer.
+    This function is designed to be run in parallel.
+
+    Returns:
+        layer_idx: Layer index
+        layer_results: Dict with AUCs for each probe type
+    """
+    # Get activations for this layer
+    X = activations[:, layer_idx, :]  # (num_examples, hidden_dim)
+    X_train, X_test = X[train_idx], X[test_idx]
+
+    layer_results = {}
+
+    # Train truth probe
+    y_truth_train, y_truth_test = truth_labels[train_idx], truth_labels[test_idx]
+    auc_truth, _ = train_probe(X_train, y_truth_train, X_test, y_truth_test)
+    layer_results['truth'] = auc_truth
+
+    # Train mode probe
+    y_mode_train, y_mode_test = mode_labels[train_idx], mode_labels[test_idx]
+    auc_mode, _ = train_probe(X_train, y_mode_train, X_test, y_mode_test)
+    layer_results['mode'] = auc_mode
+
+    # Train output probe
+    y_output_train, y_output_test = output_labels[train_idx], output_labels[test_idx]
+    auc_output, _ = train_probe(X_train, y_output_train, X_test, y_output_test)
+    layer_results['output'] = auc_output
+
+    # Train aligned probe
+    y_aligned_train, y_aligned_test = aligned_labels[train_idx], aligned_labels[test_idx]
+    auc_aligned, _ = train_probe(X_train, y_aligned_train, X_test, y_aligned_test)
+    layer_results['aligned'] = auc_aligned
+
+    return layer_idx, layer_results
+
+def train_all_probes(activations, metadata, n_jobs=-1, reduce_dim=None):
+    """
+    Train all four probes for each layer (parallelized across layers).
+
+    Args:
+        activations: Array of shape (num_examples, num_layers, hidden_dim)
+        metadata: List of metadata dicts
+        n_jobs: Number of parallel jobs (-1 uses all CPUs)
+        reduce_dim: If not None, reduce hidden_dim to this value via random projection
 
     Returns:
         results: Dict mapping probe_name -> list of AUCs (one per layer)
     """
     num_layers = activations.shape[1]
+    hidden_dim = activations.shape[2]
+
+    # Optional: Reduce dimensionality for speed
+    if reduce_dim is not None and reduce_dim < hidden_dim:
+        print(f"\nReducing dimensionality from {hidden_dim} to {reduce_dim}...")
+        # Apply random projection to each layer
+        activations_reduced = []
+        for layer_idx in range(num_layers):
+            X = activations[:, layer_idx, :]
+            transformer = GaussianRandomProjection(n_components=reduce_dim, random_state=RANDOM_STATE)
+            X_reduced = transformer.fit_transform(X)
+            activations_reduced.append(X_reduced)
+        activations = np.stack(activations_reduced, axis=1)
+        print(f"New shape: {activations.shape}")
 
     # Prepare labels
     truth_labels, mode_labels, output_labels, aligned_labels = prepare_labels(metadata)
@@ -121,7 +192,24 @@ def train_all_probes(activations, metadata):
     print(f"  Output: {output_labels.sum()}/{len(output_labels)} predicted True")
     print(f"  Aligned: {aligned_labels.sum()}/{len(aligned_labels)} aligned")
 
-    # Store results
+    # Split data once (same split for all probes and layers)
+    indices = np.arange(len(activations))
+    train_idx, test_idx = train_test_split(
+        indices, test_size=0.2, random_state=RANDOM_STATE, stratify=aligned_labels
+    )
+
+    print(f"\nTraining probes for {num_layers} layers in parallel (n_jobs={n_jobs})...")
+
+    # Train all layers in parallel
+    layer_results_list = Parallel(n_jobs=n_jobs)(
+        delayed(train_layer_probes)(
+            layer_idx, activations, truth_labels, mode_labels,
+            output_labels, aligned_labels, train_idx, test_idx
+        )
+        for layer_idx in tqdm(range(num_layers))
+    )
+
+    # Reorganize results
     results = {
         'truth': [],
         'mode': [],
@@ -129,39 +217,13 @@ def train_all_probes(activations, metadata):
         'aligned': []
     }
 
-    print(f"\nTraining probes for {num_layers} layers...")
-
-    for layer_idx in tqdm(range(num_layers)):
-        # Get activations for this layer
-        X = activations[:, layer_idx, :]  # (num_examples, hidden_dim)
-
-        # Split data (same split for all probes)
-        indices = np.arange(len(X))
-        train_idx, test_idx = train_test_split(
-            indices, test_size=0.2, random_state=RANDOM_STATE, stratify=aligned_labels
-        )
-
-        X_train, X_test = X[train_idx], X[test_idx]
-
-        # Train truth probe
-        y_truth_train, y_truth_test = truth_labels[train_idx], truth_labels[test_idx]
-        auc_truth, _ = train_probe(X_train, y_truth_train, X_test, y_truth_test)
-        results['truth'].append(auc_truth)
-
-        # Train mode probe
-        y_mode_train, y_mode_test = mode_labels[train_idx], mode_labels[test_idx]
-        auc_mode, _ = train_probe(X_train, y_mode_train, X_test, y_mode_test)
-        results['mode'].append(auc_mode)
-
-        # Train output probe
-        y_output_train, y_output_test = output_labels[train_idx], output_labels[test_idx]
-        auc_output, _ = train_probe(X_train, y_output_train, X_test, y_output_test)
-        results['output'].append(auc_output)
-
-        # Train aligned probe
-        y_aligned_train, y_aligned_test = aligned_labels[train_idx], aligned_labels[test_idx]
-        auc_aligned, _ = train_probe(X_train, y_aligned_train, X_test, y_aligned_test)
-        results['aligned'].append(auc_aligned)
+    # Sort by layer_idx and extract results
+    layer_results_list.sort(key=lambda x: x[0])
+    for _, layer_results in layer_results_list:
+        results['truth'].append(layer_results['truth'])
+        results['mode'].append(layer_results['mode'])
+        results['output'].append(layer_results['output'])
+        results['aligned'].append(layer_results['aligned'])
 
     return results
 
@@ -264,8 +326,8 @@ def main():
     # Load data
     activations, metadata = load_data()
 
-    # Train all probes
-    results = train_all_probes(activations, metadata)
+    # Train all probes (parallelized for speed)
+    results = train_all_probes(activations, metadata, n_jobs=N_JOBS, reduce_dim=REDUCE_DIM)
 
     # Plot comparison
     plot_probe_comparison(results, OUTPUT_DIR)
